@@ -6,38 +6,13 @@ from wfuzz.api import get_session
 
 from bs4 import BeautifulSoup, Comment
 
-def parse_main_args(args=None):
-    parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument( '-u','--url', required=True,
-                        help='Url to test (http://example.com/index.php')
-    parser.add_argument('-f','--filter', required=True,
-                        help='Select filter if form: contains/notcontains,<code>/<string> (--filter contains,200) (--filter notcontains "Invalid Access")')
-    parser.add_argument('-i','--ip', default="",
-                        help='Add this ip, when trying to impersonate via http headers (by default the IP of the domain/ip of the url is used)')
-    #parser.add_argument('-p','--proxy', default="",
-    #                    help='Add a proxy in WFUZZ format (-p 127.0.0.1:8080:HTML))')
-    
-    args = parser.parse_args()
-    #return (args.url, args.ip, args.filter, args.proxy) #Proxy thing, read main function
-    return (args.url, args.ip, args.filter)
+parser = argparse.ArgumentParser(description='Process some integers.')
+parser.add_argument( '-u','--url', required=True, dest="url", help='Url to test (http://example.com/index.php')
+parser.add_argument('-f','--filter', required=True, dest="filter", help='Select filter if form: contains/notcontains,<code>/<string> (--filter contains,200) (--filter notcontains "Invalid Access")')
+parser.add_argument('-i','--ip', default=[], dest="ip", help='Add this ip, when trying to impersonate via http headers (by default the IP of the domain/ip of the url is used)')
+parser.add_argument('-o','--output', default="httpfuzz.txt", dest="output", help='Output file of bypasses found')
 
-def color_print(to_print):
-    NoC = "\033[0m"
-    Y = "\033[1;33;40m"
-    G = "\033[1;32;40m"
-    B = "\033[1;34;40m"
-    R = "\033[0;31;47m"
-
-    if "[i] " in to_print:
-        print(Y+to_print+NoC)
-    elif "[+] " in to_print:
-        print(G+to_print+NoC)
-    elif "[c] " in to_print:
-        print(B+to_print+NoC)
-    elif "[-] " in to_print:
-        print(R+to_print+NoC)
-    else:
-        print(to_print)
+args = parser.parse_args()
 
 def getPartsFromUrl(url):
     'Get parts of a url'
@@ -50,7 +25,6 @@ def getIPsFromDomain(domain):
     'Get all available domains from a domain'
     domain = domain.split(":")[0]
     ips = socket.gethostbyname_ex(domain)[2]
-    color_print("[i] Found IP(s) for domain "+domain+": "+", ".join(ips))
     return ips
 
 def isIP(param):
@@ -60,107 +34,92 @@ def isIP(param):
     return True
 
 
-def fuzzPaths(url, filter2use, proxy):
+def fuzzPaths(url, filter2use):
     'Method to FUZZ paths'
-    color_print("[+] Fuzzing Path variations...")
+    print("[+] Fuzzing Path variations...")
     paths = "%2e-%252e-%ef%bc%8f"
     url_l = url.split("/")
     url_l.insert(-1,"FUZZ")
     url = "/".join(url_l)
-    wfuzz(["-z list,"+paths], filter2use, proxy, "", url)
+    wfuzz([f"-z list,{paths}"], filter2use, "", url)
 
 
-def fuzzMethods(url, filter2use, proxy):
+def fuzzMethods(url, filter2use):
     'Method to FUZZ http methods'
-    color_print("[+] Fuzzing HTTP Verbs (methods)...")
+    print("[+] Fuzzing HTTP Verbs (methods)...")
     methods = "GET-HEAD-POST-DELETE-CONNECT-OPTIONS-TRACE-PUT-INVENTED"
+    
     #PATCH method doesnt work, the program gets stucked
-    wfuzz(["-z list,"+methods], filter2use, proxy, " -X FUZZ", url)
+    wfuzz([f"-z list,{methods}"], filter2use, " -X FUZZ", url)
 
     #If only 1 depth of file path, checks different indexes
     proto, domain, path = getPartsFromUrl(url)
     if path.count("/") == 1:
         for p in ["index.php", "index", "index.html", "index.asp", "index.aspx", ""]:
             if path.split("/")[1] != p:
-                wfuzz(["-z list,"+methods], filter2use, proxy, "-X FUZZ", proto+"//"+domain+"/"+p)
+                wfuzz([f"-z list,{methods}"], filter2use, "-X FUZZ", f"{proto}//{domain}/{p}")
 
-def fuzzHeaders(url, ips, filter2use, proxy, cookies, passwords):
+def fuzzHeaders(url, ips, filter2use, cookies, passwords, useragents):
     'Method to FUZZ http headers'
-    color_print("[+] Fuzzing HTTP Headers...")
-    color_print("\t[+] Forwarded")
-    wfuzz(["-z list,"+ips+"_hidden-_secret-unknown", "-z list,"+ips, "-z list,"+ips, "-z list,http-https"], filter2use, proxy, "-H 'Forwarded:for=FUZZ;by=FUZ2Z;host=FUZ3Z;proto=FUZ4Z'", url)
-    
-    color_print("\t[+] X-Forwarded-For")
-    wfuzz(["-z list,"+ips], filter2use, proxy, "-H X-Forwarded-For:FUZZ", url)
+    print("[+] Fuzzing HTTP Headers...")
 
-    color_print("\t[+] X-Originating-IP")
-    wfuzz(["-z list,"+ips], filter2use, proxy, "-H X-Originating-IP:FUZZ", url)
-    
-    color_print("\t[+] X-Remote-IP")
-    wfuzz(["-z list,"+ips], filter2use, proxy, "-H X-Remote-IP:FUZZ", url)
-    
-    color_print("\t[+] X-Remote-Addr")
-    wfuzz(["-z list,"+ips], filter2use, proxy, "-H X-Remote-Addr:FUZZ", url)
-    
-    color_print("\t[+] X-ProxyUser-Ip")
-    wfuzz(["-z list,"+ips], filter2use, proxy, "-H X-ProxyUser-Ip:FUZZ", url)
+    wfuzz([f"-z list,{ips}_hidden-_secret-unknown", f"-z list,{ips}", f"-z list,{ips}", "-z list,http-https"], filter2use, "-H 'Forwarded:for=FUZZ;by=FUZ2Z;host=FUZ3Z;proto=FUZ4Z'", url)
+    wfuzz([f"-z list,{ips}"], filter2use, "-H X-Forwarded-For:FUZZ", url)
+    wfuzz([f"-z list,{ips}"], filter2use, "-H X-Originating-IP:FUZZ", url)
+    wfuzz([f"-z list,{ips}"], filter2use, "-H X-Remote-IP:FUZZ", url)
+    wfuzz([f"-z list,{ips}"], filter2use, "-H X-Remote-Addr:FUZZ", url)
+    wfuzz([f"-z list,{ips}"], filter2use, "-H X-ProxyUser-Ip:FUZZ", url)
+    wfuzz([f"-z list,{url}"], filter2use, "-H Referer:FUZZ", url)
 
-    color_print("\t[+] Referer")
-    wfuzz(["-z list,"+url], filter2use, proxy, "-H Referer:FUZZ", url)
-
-    color_print("\t[+] User-Agent")
-    wfuzz(["-w /tmp/list-ua.txt"], filter2use, proxy, "-H User-Agent:FUZZ", url)
+    with open("uat.txt", "w") as f:
+        f.write('\n'.join(useragents))
+    wfuzz(["-z file,uat.txt"], filter2use, "-H User-Agent:FUZZ", url)
+    os.remove("uat.txt")
 
     if len(cookies) > 0:
-        wfuzz(["-z list,"+passwords], filter2use, proxy, " ".join([ "-b "+c.name+"=FUZZ" for c in cookies ]), url)
+        wfuzz([f"-z list,{s}"], filter2use, " ".join([f"-b {c.name}=FUZZ" for c in cookies ]), url)
 
-def fuzzAutehntication(url, filter2use, proxy, users, passwords):
+def fuzzAutehntication(url, filter2use, users, passwords):
     'Method to FUZZ HTTP Authentication'
-    color_print("[+] Fuzzing HTTP Authentication...")
-    color_print("\t[+] Basic")
-    wfuzz(["-z list,"+users], filter2use, proxy, "--basic FUZZ:FUZZ", url)
-    wfuzz(["-z list,"+users,"-z list,"+passwords], filter2use, proxy, "--basic FUZZ:FUZ2Z", url)
-
-    color_print("\t[+] NTLM")
-    wfuzz(["-z list,"+users], filter2use, proxy, "--ntlm FUZZ:FUZZ", url)
-    wfuzz(["-z list,"+users,"-z list,"+passwords], filter2use, proxy, "--ntlm FUZZ:FUZ2Z", url)
+    print("[+] Fuzzing HTTP Authentication...")
+    
+    wfuzz([f"-z list,{users}"], filter2use, "--basic FUZZ:FUZZ", url)
+    wfuzz([f"-z list,{users}",f"-z list,{passwords}"], filter2use, "--basic FUZZ:FUZ2Z", url)
+    wfuzz([f"-z list,{users}"], filter2use, "--ntlm FUZZ:FUZZ", url)
+    wfuzz([f"-z list,{users}",f"-z list,{passwords}"], filter2use, "--ntlm FUZZ:FUZ2Z", url)
 
 def find_comments(text):
     for comments in soup.findAll(text=lambda text:isinstance(text, Comment)):
         comments.extract()
 
-def wfuzz(lists ,filter2use, proxy, extra, url):
+def wfuzz(lists ,filter2use, extra, url):
     'Launch wfuzz with custom options'
-    cmd = " ".join(lists)+" "+filter2use+" "+proxy+" "+extra+" "+" --req-delay 30 --conn-delay 30 "+url
+    cmd = " ".join(lists)+f" {filter2use} {extra} --req-delay 30 --conn-delay 30 {url}"
     cmd = cmd.replace("  "," ").replace("  "," ").replace("  "," ")
-    color_print("[c] Trying: "+cmd)
-    for r in get_session(cmd).fuzz():
-        print(r)
+    
+    with open(args.output, "a") as file:
+        for r in get_session(cmd).fuzz():
+            print(cmd, r)
+            file.write(f"{cmd} {r}\n")
+            
 
 def main():
-    #url, ip, f2u, proxy = parse_main_args(sys.argv[1:])
-    url, ip, f2u = parse_main_args(sys.argv[1:])
-    proxy = "" #If you use the proxy the HTTP methods POST and PUT stuck the program, so dont use a proxy until this is fixed!! (is all prepare for using it)
-
-    if len(f2u.split(",")) != 2:
-        color_print("[-] Error, bad filter selected")
+    if len(args.filter.split(",")) != 2:
+        print("[-] Error, bad filter selected")
         sys.exit(2)
 
-    if f2u.split(",")[0] == "contains":
+    if args.filter.split(",")[0] == "contains":
         filter2use = "--s"
-    elif f2u.split(",")[0] == "notcontains":
+    elif args.filter.split(",")[0] == "notcontains":
         filter2use = "--h"
     else:
-        color_print("[-] Error, bad filter selected")
+        print("[-] Error, bad filter selected")
         sys.exit(2)
     
-    if f2u.split(",")[1].isdigit():
-        filter2use += "c "+f2u.split(",")[1]
+    if args.filter.split(",")[1].isdigit():
+        filter2use += f"c {args.filter.split(',')[1]}"
     else:
-        filter2use += 's "'+f2u.split(",")[1]+'"'
-
-    if proxy is not None and proxy != "":
-        proxy = "-p "+proxy
+        filter2use += f's {args.filter.split(",")[1]}'
         
     users="admin-administrator-root-anonymous-ftp-guest-superadmin-tomcat-user-test-public-mysql"
     passwords="admin-administrator-password-123456-12345678-root-toor-qwerty-anonymous-True"
@@ -170,38 +129,30 @@ def main():
                 "Mozilla/5.0 (Macintosh; U; PPC Mac OS X Mach-O; en-US; rv:1.7.8) Gecko/20050511 Firefox/1.0.4",
                 "Mozilla/5.0 (Linux; Android 9; SM-G960F Build/PPR1.180610.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/74.0.3729.157 Mobile Safari/537.36",
                 "Googlebot", "Bingbot", "admin" ]
-        
-    with open("/tmp/list-ua.txt", 'w') as f:
-        for ua in useragents:
-            f.write(ua+"\n")
 
-    r = requests.get(url)
+
+    r = requests.get(args.url)
     status_code = r.status_code
     body = r.text
     resp_length = len(body)
     cookies = r.cookies
     is_redir = r.is_redirect or r.is_permanent_redirect or (status_code > 299 and status_code < 400)
 
-    color_print("[i] Making a simple GET request the returned code was "+str(status_code)+" and the length of the body was "+str(resp_length))
     if cookies is not None and len(cookies) > 0:
-        color_print("[i] The web wanted to set these cookies: ")
         for c in cookies:
-            print(c.name+"="+c.value)
+            print(c.name+"={c}".value)
     if is_redir and resp_length > 0:
-        color_print("[i] Hey, the web is redirecting us but it has some contet, take a look:")
-        color_print(body)
+        print(body)
 
-    proto, domain, path = getPartsFromUrl(url)
-    ips = ["127.0.0.1", "8.8.4.4"] + [ip] if ip != "" else ["127.0.0.1", "8.8.4.4"]
+    proto, domain, path = getPartsFromUrl(args.url)
+    ips = ["127.0.0.1", "8.8.4.4"] + args.ip
     ips = ips + getIPsFromDomain(domain) if not isIP(domain) else ips
     ips = "-".join(ips)
-    color_print("[i] IPs that are going to be use for FUZZING: "+ips)
 
-    print("")
-    fuzzPaths(url, filter2use, proxy)
-    fuzzMethods(url, filter2use, proxy)
-    fuzzHeaders(url, ips, filter2use, proxy, cookies, passwords)
-    fuzzAutehntication(url, filter2use, proxy, users, passwords)
+    fuzzPaths(args.url, filter2use)
+    fuzzMethods(args.url, filter2use)
+    fuzzHeaders(args.url, ips, filter2use, cookies, passwords, useragents)
+    fuzzAutehntication(args.url, filter2use, users, passwords)
 
     os.kill(os.getpid(), signal.SIGTERM)
 
